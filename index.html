@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        background-color: #1e293b;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        font-family: Helvetica;
+      }
+
+      .card {
+        width: 66.7%;
+        height: 800px;
+        position: relative;
+        border-radius: 40px;
+        padding: 40px;
+        box-sizing: border-box;
+        overflow: hidden;
+        box-shadow: inset 0px 0px 40px rgba(0, 0, 0, 0.8),
+          0px 8px 20px rgba(0, 0, 0, 0.6);
+      }
+
+      .card::after {
+        content: "";
+        position: absolute;
+        top: -300px;
+        right: -300px;
+        bottom: -300px;
+        left: -300px;
+        background: conic-gradient(
+          from 180deg at 50% 50%,
+          #e65100 -97.5deg,
+          #f57f17 14.05deg,
+          #ff8f00 54.01deg,
+          #ffa000 113.42deg,
+          #ff8f00 185.62deg,
+          #f57f17 262.5deg,
+          #ff6f00 374.05deg
+        );
+        filter: blur(60px) brightness(1.5);
+        z-index: -1;
+        animation: 30s move linear infinite;
+      }
+
+      h2 {
+        margin: 0;
+        padding: 0;
+        font-size: 60px;
+        letter-spacing: -1px;
+        color: #fff;
+        text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+
+      span {
+        font-size: 50px;
+        font-weight: normal;
+        display: block;
+      }
+
+      .card > div {
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 20px 40px;
+        font-size: 32px;
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        color: #fff;
+      }
+
+      @keyframes move {
+        from {
+          transform: rotate(180deg);
+        }
+        to {
+          transform: rotate(540deg);
+        }
+      }
+      :root {
+        font-size: 15px;
+        --lighting-size: 300px;
+        --lighting-color: #3e2723;
+        --lighting-highlight-color: #f57c00;
+      }
+
+      body {
+        --x: 0px;
+        --y: 0px;
+
+        background-color: #020617;
+        color: #94a3b8;
+      }
+
+      div {
+        padding: 40px;
+      }
+
+      a {
+        text-decoration: none;
+        color: #4e342e;
+        display: inline-block;
+
+        background-image: radial-gradient(
+          var(--lighting-highlight-color),
+          var(--lighting-color),
+          var(--lighting-color)
+        );
+        background-size: var(--lighting-size) var(--lighting-size);
+        background-repeat: no-repeat;
+
+        background-position-x: calc(
+          var(--x) - var(--positionX) - calc(var(--lighting-size) / 2)
+        );
+        background-position-y: calc(
+          var(--y) - var(--positionY) - calc(var(--lighting-size) / 2)
+        );
+
+        background-color: var(--lighting-color);
+
+        color: transparent;
+        -webkit-background-clip: text;
+        background-clip: text;
+      }
+      p {
+        font-size: x-large;
+        color: black;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2 style="color: #a7ffeb">#AzoteFurry</h2>
+      <p>CQ CQ CQ. Here is Azote.</p>
+      <p>X: <a href="https://x.com/AzoteFurry" target="_blank" >@AzoteFurry</a></p>
+      <p>Telegram: <a href="https://t.me/AzoteFurry" target="_blank">@AzoteFurry</a></p>
+      <p>Github&nbsp;&nbsp;&nbsp;<a href="" target="_blank">AzoteGwei</a></p>
+      <p>ActivityPub: <a href="@AzoteGwei@meow.social" target="_blank">@AzoteFurry</a></p>
+      <div><span style="font-size: large;;">Powered By Azote.</span><p style="font-size: small;">Inspired by <a href="https://codepen.io/stevenlei/pen/ExOPRmV">conic-gradient card</a> and <a href="https://codepen.io/stevenlei/pen/eYQWWmZ">Spotlight Effect on Links</a> by Steven Lei</p></div>
+    </div>
+    <script>
+      document.querySelector("body").addEventListener("mousemove", (e) => {
+        e.currentTarget.style.setProperty("--x", `${e.clientX}px`);
+        e.currentTarget.style.setProperty("--y", `${e.clientY}px`);
+      });
+
+      function setLinksPositions() {
+        document.querySelectorAll("a").forEach((a) => {
+          const bounding = a.getBoundingClientRect();
+
+          a.style.setProperty("--positionX", `${bounding.x}px`);
+          a.style.setProperty("--positionY", `${bounding.y}px`);
+        });
+      }
+
+      window.addEventListener("load", setLinksPositions);
+      window.addEventListener("resize", setLinksPositions);
+    </script>
+  </body>
+</html>
