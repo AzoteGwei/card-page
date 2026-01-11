@@ -6826,8 +6826,8 @@ pre {
                     </label>
                 </div>
                 <div class="forced-share-container" style="display:none; margin-bottom: 10px;">
-                    <input class="forced-share form-control" type="text"
-                        placeholder="Enter share to force inclusion of (e.g. 801c...)">
+                    <textarea class="forced-share form-control" rows=3
+                        placeholder="Enter shares to force inclusion of (one per line, e.g. 801c...)"></textarea>
                 </div>
                 <textarea class="secret form-control" rows=10 placeholder="Enter your secret here"></textarea>
                 <h2>Usage</h2>
@@ -7319,61 +7319,113 @@ pre {
         return shares;
     }
 
-    function getSharesWithKnown(secret, numShares, threshold, knownId, knownData) {
+    function getSharesWithMultipleKnown(secret, numShares, threshold, knownPoints) {
         var shares = [],
-            coeffs = [secret],
+            coeffs = [],
             i,
             len,
-            partialY,
-            diff,
-            a1;
+            j;
 
-        // Generate lower coefficients except a1
-        // a0 is secret
-        // a1 is unknown
-        // a2...at-1 are random
+        // knownPoints is an array of {id: int, data: int (chunk)}
+        // The point (0, secret) is also a known point mechanically.
 
-        // Initialize with placeholder for a1
-        coeffs[1] = 0;
+        // We need 'threshold' points to define the polynomial of degree threshold-1.
+        // We have:
+        // 1 point from secret: (0, secret)
+        // N points from knownPoints: (id, data)
+        // Total fixed points = 1 + N
+        // We need to generate (threshold - (1 + N)) random points.
 
-        for (i = 2; i < threshold; i++) {
-            coeffs[i] = parseInt(config.rng(config.bits), 2);
+        var fixedPoints = [{ x: 0, y: secret }];
+        for (i = 0; i < knownPoints.length; i++) {
+            fixedPoints.push({ x: knownPoints[i].id, y: knownPoints[i].data });
         }
 
-        // Calculate partial value at knownId with a1=0
-        partialY = horner(knownId, coeffs);
+        // Ensure strictly less than threshold (user requirement check should happen before calling this generally, but safety here is good)
+        // Actually, mathematically we need exactly 'threshold' points to uniquely define the polynomial.
+        // If we have fewer than 'threshold' fixed points, we can pick random points to fill the gap.
+        // If we have >= 'threshold' fixed points, the polynomial is over-determined or uniquely determined (if exactly threshold).
+        // The user requirement says "fixed point quantity strictly less than required".
+        // This implies we MUST have at least 1 degree of freedom (randomness).
 
-        // Logic: P(knownId) = knownData
-        // P(knownId) = a0 + a1*knownId + a2*knownId^2 + ...
-        // P(knownId) = (a0 + 0 + a2*knownId^2 + ...) XOR (a1 * knownId)
-        // knownData = partialY XOR (a1 * knownId)
-        // a1 * knownId = knownData XOR partialY
-        // a1 = (knownData XOR partialY) / knownId (in GF)
-
-        diff = knownData ^ partialY;
-
-        // Calculate a1 = diff / knownId
-        if (knownId === 0) {
-            throw new Error("Argument 'knownId' cannot be zero.");
+        if (fixedPoints.length > threshold) {
+            throw new Error("Number of fixed points (including secret) must be less than or equal to the threshold.");
         }
 
-        // Division in GF
-        if (diff === 0) {
-            a1 = 0;
-        } else {
-            var logDiff = config.logs[diff];
-            var logId = config.logs[knownId];
-            var logA1 = (logDiff - logId + config.maxShares) % config.maxShares;
-            a1 = config.exps[logA1];
+        // Generate random support points
+        var pointsToGenerate = threshold - fixedPoints.length;
+
+        // We need to pick x-coordinates for random points that do not collide with existing fixed points
+        // or the share ids we are about to generate (1..numShares).
+        // Actually, they CAN collide with share ids (1..numShares) if we just treat them as "points we decided the polynomial passes through".
+        // HOWEVER, to avoid confusion and ensure we don't accidentally constrain a share to be something specific unless intended,
+        // it's cleaner to pick random support points at indices OUTSIDE the range of share IDs if possible, 
+        // OR just pick random x and calculate y.
+        // BUT wait, standard Shamir uses random coeffs implies random support points.
+        // Let's stick to the method: define 'threshold' points, then interpolate.
+
+        // To keep it simple and consistent with standard Shamir properties (randomness):
+        // We select 'pointsToGenerate' random x coordinates that are NOT in existing fixedPoints x.
+        // Then we assign random y values to them.
+
+        // Strategy:
+        // 1. Identify used x-coords (0 and knownIds).
+        // 2. Pick 'pointsToGenerate' unique random x-coords (e.g. from a safe large range or just distinct from used).
+        //    Actually, we can just use indices that are unlikely to technically collide, or just check.
+        //    But wait, we can just generate random coefficients a_i? No, that won't satisfy P(knownId) = knownData.
+
+        // Better Strategy (Lagrange Interpolation approach):
+        // We have a set of 'threshold' points: P_fixed + P_random.
+        // P_fixed = {(0, secret), (id1, data1), ...}
+        // P_random = {(x_rand1, y_rand1), ...} where x_rand are newly chosen indices, y_rand are random 1024-bit (or whatever bit default) numbers.
+        // Then we construct the polynomial passing through ALL these points using Lagrange Interpolation.
+        // Then we evaluate this polynomial at x=1..numShares to get the shares.
+
+        // Choosing x for random points:
+        // We can just pick x values like maxShares, maxShares-1, etc. (high indices) to avoid collision with typical share IDs (small integers).
+        // Or better: Just generate meaningful random points. 
+        // Let's use x-coordinates starting from maxShares down, or just arbitrary unique ones.
+        // config.maxShares is 2^bits - 1. 
+        // Let's avoid 0 and knownIds.
+
+        var currentPoints = fixedPoints.slice();
+
+        // We need to add random points until we have 'threshold' points.
+        // For the random points, we pick x values that are NOT in used x.
+        // To be deterministic enough but random, let's pick x sequentially from large numbers or just random.
+        // Random x is better for security? No, x is public usually (share ID).
+        // Let's just use a simple robust strategy:
+        // Generate random x, check collision.
+        // Generate random y.
+
+        while (currentPoints.length < threshold) {
+            var rX = parseInt(config.rng(config.bits), 2);
+            // Check collision with existing x
+            var col = false;
+            for (j = 0; j < currentPoints.length; j++) {
+                if (currentPoints[j].x === rX) { col = true; break; }
+            }
+            if (!col) {
+                var rY = parseInt(config.rng(config.bits), 2);
+                currentPoints.push({ x: rX, y: rY });
+            }
         }
 
-        coeffs[1] = a1;
+        // Now we have 'threshold' points in currentPoints.
+        // We don't need the coefficients explicitly to evaluate at x=1..numShares.
+        // We can just use Lagrange interpolation directly to find y for any x.
+        // y(x) = sum( y_j * L_j(x) )
+        // BUT, `lagrange` function in secrets.js seems to compute the value at `at` given arrays x[] and y[].
+        // Let's check `lagrange` signature: function lagrange(at, x, y)
+        // It takes arrays x and y.
 
-        // Generate shares
+        var pX = currentPoints.map(function (p) { return p.x; });
+        var pY = currentPoints.map(function (p) { return p.y; });
+
         for (i = 1, len = numShares + 1; i < len; i++) {
             shares[i - 1] = {
                 x: i,
-                y: horner(i, coeffs)
+                y: lagrange(i, pX, pY)
             };
         }
 
@@ -7619,21 +7671,28 @@ pre {
             obj.maxShares = config.maxShares;
             obj.hasCSPRNG = isSetRNG();
             obj.typeCSPRNG = config.typeCSPRNG;
-            obj.forcedShare = config.forcedShare || null;
+            obj.forcedShares = config.forcedShares || [];
             return obj;
         },
 
-        setForcedShare: function (share) {
-            if (!share) {
-                config.forcedShare = null;
+        setForcedShares: function (shares) {
+            if (!shares || shares.length === 0) {
+                config.forcedShares = [];
                 return;
             }
-            var components = this.extractShareComponents(share);
-            config.forcedShare = components;
+            if (!Array.isArray(shares)) {
+                throw new Error("setForcedShares expects an array of shares.");
+            }
+
+            var components = [];
+            for (var i = 0; i < shares.length; i++) {
+                components.push(this.extractShareComponents(shares[i]));
+            }
+            config.forcedShares = components;
         },
 
-        unsetForcedShare: function () {
-            config.forcedShare = null;
+        unsetForcedShares: function () {
+            config.forcedShares = [];
         },
 
         // Given a public share, extract the bits (Integer), share ID (Integer), and share data (Hex)
@@ -7872,31 +7931,53 @@ pre {
             secret = "1" + hex2bin(secret); // append a 1 as a marker so that we can preserve the correct number of leading zeros in our secret
             secret = splitNumStringToIntArray(secret, padLength);
 
-            var forcedChunks = [];
-            if (config.forcedShare) {
-                // Prepare forced chunks
-                // config.forcedShare.data is Hex. Convert to Int Array.
-                // We do NOT use padLength for the share separation as it shouldn't add '1' or extra zeros typically?
-                // Actually, splitNumStringToIntArray processes the binary string into bit-sized chunks.
-                // We should just process it.
-                var forcedBin = hex2bin(config.forcedShare.data);
-                forcedChunks = splitNumStringToIntArray(forcedBin);
+            var forcedChunks = []; // array of array of chunks. forcedChunks[i] = [chunkVal_share1, chunkVal_share2, ...] (for the i-th secret chunk)
+
+            if (config.forcedShares && config.forcedShares.length > 0) {
+                // Initialize forcedChunks
+                // We want to pivot: config.forcedShares is [Share1, Share2...]
+                // We need structure by secret chunk index.
+
+                // First process each share string into chunks.
+                var processedShares = [];
+                for (var s = 0; s < config.forcedShares.length; s++) {
+                    var forcedBin = hex2bin(config.forcedShares[s].data);
+                    processedShares.push({ id: config.forcedShares[s].id, chunks: splitNumStringToIntArray(forcedBin) });
+                }
+
+                // Now pivot.
+                // Assuming all shares correspond to the same secret length (valid assumption for robust usage, but we might need to be careful with padding).
+                // If they differ, it might be weird. But let's assume valid input for now.
+                // Actually, splitNumStringToIntArray depends on string length.
+
+                // We need to know how many chunks. secret.length
+                for (var k = 0; k < secret.length; k++) {
+                    forcedChunks[k] = [];
+                    for (var s = 0; s < processedShares.length; s++) {
+                        // Check if this share has a chunk at k
+                        // splitNumStringToIntArray returns chunks right-to-left? 
+                        // No, let's check splitNumStringToIntArray again.
+                        // It pushes parseInt(str.slice(...)).
+                        // If string length varies, alignment might be an issue.
+                        // But users should be providing shares generated from the same secret (same length).
+                        if (processedShares[s].chunks[k] !== undefined) {
+                            forcedChunks[k].push({ id: processedShares[s].id, data: processedShares[s].chunks[k] });
+                        }
+                    }
+                }
             }
 
             for (i = 0, len = secret.length; i < len; i++) {
 
                 var subShares;
-                var useForced = false;
-                var kId = 0, kData = 0;
+                var currentFixed = [];
 
-                if (config.forcedShare && forcedChunks[i] !== undefined) {
-                    useForced = true;
-                    kId = config.forcedShare.id;
-                    kData = forcedChunks[i];
+                if (forcedChunks[i] && forcedChunks[i].length > 0) {
+                    currentFixed = forcedChunks[i];
                 }
 
-                if (useForced) {
-                    subShares = getSharesWithKnown(secret[i], numShares, threshold, kId, kData);
+                if (currentFixed.length > 0) {
+                    subShares = getSharesWithMultipleKnown(secret[i], numShares, threshold, currentFixed);
                 } else {
                     subShares = getShares(secret[i], numShares, threshold);
                 }
@@ -8043,14 +8124,17 @@ pre {
 
         // Handle Forced Share
         if (DOM.useForcedShare.checked && DOM.forcedShare.value.trim().length > 0) {
+            var forcedText = DOM.forcedShare.value.trim();
+            var forcedShares = forcedText.split(/[\r\n]+/).filter(function (s) { return s.trim().length > 0; });
+
             try {
-                secrets.setForcedShare(DOM.forcedShare.value.trim());
+                secrets.setForcedShares(forcedShares);
             } catch (e) {
-                DOM.error.textContent = "Invalid forced share: " + e.message;
+                DOM.error.textContent = "Invalid forced share(s): " + e.message;
                 return;
             }
         } else {
-            secrets.unsetForcedShare();
+            secrets.unsetForcedShares();
         }
 
         // Generate the parts to share
